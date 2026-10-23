@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# 在当前项目目录复制模板,已存在文件不覆盖
+set -euo pipefail
+KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$KIT/template"
+created=0; skipped=0
+while IFS= read -r -d '' f; do
+  rel="${f#$SRC/}"
+  if [ -e "$rel" ]; then
+    echo "跳过(已存在): $rel"; skipped=$((skipped+1))
+  else
+    mkdir -p "$(dirname "$rel")"
+    cp "$f" "$rel"
+    echo "创建: $rel"; created=$((created+1))
+  fi
+done < <(find "$SRC" -type f -print0)
+echo "完成:创建 $created 个,跳过 $skipped 个。请编辑 AGENTS.md 填写测试命令。"

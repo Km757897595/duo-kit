@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# 把全局指令以标记块安装到 ~/.codex/AGENTS.md(可重复运行),并复制 Cursor 规则
+set -euo pipefail
+KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="$HOME/.codex/AGENTS.md"
+BEGIN="<!-- DUO-KIT:BEGIN -->"
+END="<!-- DUO-KIT:END -->"
+mkdir -p "$HOME/.codex"
+touch "$TARGET"
+if grep -qF "$BEGIN" "$TARGET"; then
+  tmp="$(mktemp)"
+  awk -v b="$BEGIN" -v e="$END" '$0==b{skip=1} !skip{print} $0==e{skip=0}' "$TARGET" > "$tmp"
+  mv "$tmp" "$TARGET"
+  echo "已存在标记块,将更新为最新内容。"
+fi
+{ [ -s "$TARGET" ] && echo; echo "$BEGIN"; cat "$KIT/global/codex-AGENTS.md"; echo "$END"; } >> "$TARGET"
+echo "已安装到 $TARGET"
+PSRC="$KIT/global/codex-prompts/duo.md"
+PDST="$HOME/.codex/prompts/duo.md"
+if [ -f "$PSRC" ]; then
+  mkdir -p "$HOME/.codex/prompts"
+  if [ -e "$PDST" ]; then
+    if cmp -s "$PSRC" "$PDST"; then echo "自定义命令 $PDST 已是最新,跳过。"
+    else echo "已存在 $PDST(可能是你修改过的),跳过不覆盖。想更新请先删除再重跑。"; fi
+  else
+    cp "$PSRC" "$PDST"; echo "已安装 Codex CLI 自定义命令 /duo -> $PDST"
+  fi
+fi
+echo
+echo "下一步(手动):打开 Cursor > Settings > Rules > User Rules,粘贴以下文件内容:"
+echo "  $KIT/global/cursor-user-rules.md"
+if command -v pbcopy >/dev/null 2>&1; then
+  pbcopy < "$KIT/global/cursor-user-rules.md"
+  echo "已复制到剪贴板,直接粘贴即可。"
+else
+  echo "(未找到 pbcopy,已跳过复制,请手动打开上述文件复制。)"
+fi
+echo "提示:可把 $KIT/bin 加入 PATH,以便在任意项目运行 duo-init。"
