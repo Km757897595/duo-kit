@@ -109,7 +109,7 @@ Collaboration mode applies only to the current message containing `/duo`. Includ
 /duo Add request validation to the login endpoint, follow the existing API format, and add tests.
 ```
 
-Codex reads the project rules, plan, and notes, then creates task files from the template. For example, `.work/tasks/001-login-validation.md` would define the allowed scope and executable acceptance commands.
+Codex reads the project rules, plan, and notes, then creates task files from the template. For example, `.work/tasks/001-login-validation.md` would define the allowed scope, behavioral acceptance scenarios, and executable acceptance commands.
 
 **Step 2: Ask Cursor or Codex to implement the task.** Open the same project in Cursor and give its Agent the actual task file path:
 
@@ -123,7 +123,7 @@ Alternatively, open the same project in another Codex chat and send:
 /duo 执行 001
 ```
 
-The implementer sets the state to `进行中` (In progress), implements within the allowed scope, and runs the acceptance commands. Once they pass, it sets the state to `待验收` (Ready for review), records the changes and verification results, and adds findings outside the scope to `.work/notes.md`.
+The implementer first records the base commit and pre-existing changes, then sets the state to `进行中` (In progress), implements within the allowed scope, runs the acceptance commands, and checks each acceptance scenario. Once all checks pass, it records the handoff code version and sets the state to `待验收` (Ready for review). Findings outside the scope go in `.work/notes.md`.
 
 **Step 3: Ask Codex to review.** Return to Codex and send:
 
@@ -131,7 +131,7 @@ The implementer sets the state to `进行中` (In progress), implements within t
 /duo 验收 001
 ```
 
-Codex checks `git diff`, file boundaries, and architecture constraints, and runs the acceptance commands itself. If they pass, it marks the task `完成` (Done) and updates the plan. Otherwise, it returns the task to `进行中` (In progress), records the issues, and you hand it back to the implementer for corrections.
+Codex verifies the handoff code version, inspects committed, staged, unstaged, and untracked changes, checks file boundaries and architecture constraints, and runs the acceptance commands and verifies each scenario itself. If they pass, it marks the task `完成` (Done) and updates the plan. Otherwise, it returns the task to `进行中` (In progress), records the issues, and you hand it back to the implementer for corrections.
 
 ```text
 待办 (To do) → 进行中 (In progress) → 待验收 (Ready for review) → 完成 (Done)
@@ -150,11 +150,21 @@ Use one file per task, named `NNN-short-name.md`, with sequential three-digit nu
 | `目标` — Goal | One small task with a clear, verifiable outcome |
 | `允许改动文件` — Allowed files | Specific file paths or directories |
 | `禁区` — Restricted areas | Files or behavior that must not be changed |
+| `验收场景` — Acceptance scenarios | Inputs or actions and observable expected results, covering normal, error, and relevant regression cases |
 | `验收命令` — Acceptance commands | Commands that can be run directly, with clear pass criteria |
+| `代码版本` — Code version | Working directory, branch, base commit, pre-existing changes, handoff HEAD, and SHA-256 hashes or deletion states for uncommitted code |
 | `状态` — State | One of `待办`, `进行中`, `待验收`, or `完成` |
 | `备注` — Notes | Implementation details, verification results, or reasons for returning the task |
 
 See the full [task template](template/.work/tasks/000-template.md).
+
+### Code Versions and Review Evidence
+
+- Before starting, record the working directory, branch, base commit, and pre-existing changes. Preserve the original base when resuming. At handoff, record HEAD, task commits if any, and the state and SHA-256 of uncommitted code files. Automatic commits are not required.
+- Review committed changes with `git diff <base-commit> <handoff-HEAD>` using the recorded commits. Also inspect `git diff --cached`, `git diff`, and `git status --short --untracked-files=all`, and read new files. Default `git diff` alone misses committed, staged, and untracked content.
+- Compare against the starting record to distinguish task changes from pre-existing work. If code changes after handoff or its version cannot be confirmed, complete the evidence or arrange a new handoff before accepting it.
+- Without Git or an initial commit, follow the protocol to record the starting file list, hashes of relevant existing files, handoff differences, and resulting file hashes or deletion states. Do not compare nonexistent commits.
+- Passing commands must also satisfy the acceptance scenarios. For a login validation task, check that missing passwords return the expected error and valid credentials still work, then record actual results. A successful build alone does not verify behavior.
 
 ## Repository Structure
 
@@ -195,6 +205,7 @@ duo-init --update
 
 - Changed files are backed up alongside the originals as `filename.duo-backup.random-suffix`. Identical files are skipped without new backups. Restore manually from a backup if needed; backups may contain personal rules, so consider adding them to your project's `.gitignore`.
 - Project descriptions, commands, and custom rules outside the managed block are preserved. Existing plans, notes, task files, and task templates under `.work/` are never overwritten.
+- After updating, compare with the new [task template](template/.work/tasks/000-template.md) and manually add `验收场景` (Acceptance scenarios) and `代码版本` (Code version) to existing templates and tasks awaiting execution. If the historical base is unknown, record the current state and explicitly arrange a new handoff rather than inventing old records.
 - For older projects without markers, the section titled `## 协作协议(架构师 + 突击手)` is replaced up to the next heading of the same or a higher level. Merge custom content from that section back from the backup. If no such section exists, the managed block is appended.
 - Keep custom rules outside the managed block. Prompt files and Cursor project rules are replaced as whole files; manually merge their customizations from backups. Cursor User Rules still need to be pasted manually; the installer copies them to the clipboard.
 - Unpaired or duplicate markers cause an error; the affected rule file is preserved. Repair its markers before retrying.
