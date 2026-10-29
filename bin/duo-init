@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 在当前项目目录复制模板,已存在文件不覆盖
+# 在当前项目目录复制模板;--update 备份并更新规则及任务模板
 set -euo pipefail
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$KIT/bin/duo-common.sh"
-USAGE='用法: duo-init [--update]。--update 备份并更新协作规则;保留项目规范、计划、备注和任务。'
+USAGE='用法: duo-init [--update]。--update 备份并更新协作规则及 000-template.md;保留项目规范、计划、备注和实际任务。'
 duo_options "$@"
 SRC="$KIT/template"
 if [ "$UPDATE" -eq 1 ]; then duo_validate AGENTS.md; fi
@@ -16,7 +16,7 @@ while IFS= read -r -d '' f; do
       trap 'rm -f "$protocol"' EXIT
       awk '/^<!-- DUO-KIT:END -->$/ { inside=0 } inside { print } /^<!-- DUO-KIT:BEGIN -->$/ { inside=1 }' "$f" > "$protocol"
       duo_upsert "$rel" "$protocol" '## 协作协议(架构师 + 突击手)'
-    elif [ "$UPDATE" -eq 1 ] && [ "$rel" = .cursor/rules/main.mdc ]; then
+    elif [ "$UPDATE" -eq 1 ] && { [ "$rel" = .cursor/rules/main.mdc ] || [ "$rel" = .work/tasks/000-template.md ]; }; then
       duo_copy "$f" "$rel"
     else
       echo "跳过(保留已有文件): $rel"; skipped=$((skipped+1))

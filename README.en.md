@@ -201,11 +201,11 @@ duo-init --update
 | `duo-install` | Updates the global `DUO-KIT` block; skips existing prompt files |
 | `duo-install --update` | Updates the global block and backs up then replaces the existing `~/.codex/prompts/duo.md` |
 | `duo-init` | Creates missing files; skips existing files |
-| `duo-init --update` | Updates the collaboration block in project `AGENTS.md`, backs up then replaces `.cursor/rules/main.mdc`, and creates missing template files |
+| `duo-init --update` | Updates the collaboration block in project `AGENTS.md`, backs up then replaces `.cursor/rules/main.mdc` and `.work/tasks/000-template.md`, and creates missing template files |
 
 - Changed files are backed up alongside the originals as `filename.duo-backup.random-suffix`. Identical files are skipped without new backups. Restore manually from a backup if needed; backups may contain personal rules, so consider adding them to your project's `.gitignore`.
-- Project descriptions, commands, and custom rules outside the managed block are preserved. Existing plans, notes, task files, and task templates under `.work/` are never overwritten.
-- After updating, compare with the new [task template](template/.work/tasks/000-template.md) and manually add `验收场景` (Acceptance scenarios) and `代码版本` (Code version) to existing templates and tasks awaiting execution. If the historical base is unknown, record the current state and explicitly arrange a new handoff rather than inventing old records.
+- Project descriptions, commands, and custom rules outside the managed block are preserved. Existing plans, notes, and actual task files under `.work/` are never overwritten. With `--update`, `000-template.md` is backed up and replaced as a whole file; merge custom template content manually from the backup. Identical content produces no new backup, and plain `duo-init` still preserves existing templates.
+- After updating, the template contains the latest fields. Compare existing tasks with the [task template](template/.work/tasks/000-template.md) and manually add `验收场景` (Acceptance scenarios) and `代码版本` (Code version). If the historical base is unknown, record the current state and explicitly arrange a new handoff rather than inventing old records.
 - For older projects without markers, the section titled `## 协作协议(架构师 + 突击手)` is replaced up to the next heading of the same or a higher level. Merge custom content from that section back from the backup. If no such section exists, the managed block is appended.
 - Keep custom rules outside the managed block. Prompt files and Cursor project rules are replaced as whole files; manually merge their customizations from backups. Cursor User Rules still need to be pasted manually; the installer copies them to the clipboard.
 - Unpaired or duplicate markers cause an error; the affected rule file is preserved. Repair its markers before retrying.

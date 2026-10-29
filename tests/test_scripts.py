@@ -105,7 +105,7 @@ class ScriptTests(unittest.TestCase):
         self.run_script("duo-init")
         cursor = self.project / ".cursor/rules/main.mdc"
         cursor.write_text("自定义 Cursor 规则\n")
-        records = [self.project / ".work/notes.md", self.project / ".work/tasks/000-template.md"]
+        records = [self.project / ".work/notes.md", self.project / ".work/tasks/001-task.md"]
         for path in records:
             path.write_text("用户自己的记录\n")
         self.run_script("duo-init", "--update")
@@ -115,6 +115,24 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(backups[0].read_text(), "自定义 Cursor 规则\n")
         for path in records:
             self.assertEqual(path.read_text(), "用户自己的记录\n")
+
+    def test_task_template_update_backs_up_and_skips_identical_content(self):
+        self.run_script("duo-init")
+        template = self.project / ".work/tasks/000-template.md"
+        source = KIT / "template/.work/tasks/000-template.md"
+        self.assertEqual(template.read_bytes(), source.read_bytes())
+        template.write_text("自定义旧模板\n")
+        self.run_script("duo-init")
+        self.assertEqual(template.read_text(), "自定义旧模板\n")
+        self.assertEqual(list(template.parent.glob("000-template.md.duo-backup.*")), [])
+        self.run_script("duo-init", "--update")
+        self.assertEqual(template.read_bytes(), source.read_bytes())
+        backups = list(template.parent.glob("000-template.md.duo-backup.*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), "自定义旧模板\n")
+        self.run_script("duo-init", "--update")
+        self.assertEqual(template.read_bytes(), source.read_bytes())
+        self.assertEqual(backups, list(template.parent.glob("000-template.md.duo-backup.*")))
 
     def test_unknown_options_fail_and_help_has_no_side_effects(self):
         for name in ("duo-install", "duo-init"):
