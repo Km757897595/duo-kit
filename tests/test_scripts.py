@@ -201,6 +201,23 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("src/secret.txt 命中「禁区」", result.stdout)
         self.assertIn("进行中", task.read_text())
 
+    def test_duo_ignores_evidence_and_design_records(self):
+        self.git("init", "-q")
+        (self.project / "app.txt").write_text("v1\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "init")
+        self.run_script("duo-init")
+        self.assertTrue((self.project / ".work/design.md").exists())
+        task = self.new_task()
+        self.run_script("duo", "start", "1")
+        (self.project / "app.txt").write_text("v2\n")
+        evidence = self.project / ".work/evidence/001"
+        evidence.mkdir(parents=True)
+        (evidence / "desktop.png").write_bytes(b"png")
+        self.run_script("duo", "handoff", "1")
+        self.assertNotIn("`.work/evidence/001/desktop.png`", task.read_text())
+        self.run_script("duo", "check", "1")
+
     def test_duo_without_git_uses_full_snapshot(self):
         self.run_script("duo-init")
         (self.project / "app.txt").write_text("v1\n")

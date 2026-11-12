@@ -49,9 +49,9 @@ states() {
   done
 }
 
-# 当前任务单、备注与快照属于记录文件,不计入代码改动。
+# 当前任务单、备注、快照与验收证据属于记录文件,不计入代码改动。
 not_records() {
-  awk -F'\t' -v t="$TASK" '{p=$NF} p!=t && p!=".work/notes.md" && index(p, ".work/snapshots/")!=1'
+  awk -F'\t' -v t="$TASK" '{p=$NF} p!=t && p!=".work/notes.md" && index(p, ".work/snapshots/")!=1 && index(p, ".work/evidence/")!=1'
 }
 
 # 本任务相对基础的改动;执行前已有且之后未再变化的文件不计入。

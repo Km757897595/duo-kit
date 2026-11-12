@@ -79,6 +79,7 @@ your-project/
 └── .work/
     ├── plan.md                # Goals, architecture constraints, restrictions, progress
     ├── notes.md               # Findings outside the current task scope
+    ├── design.md              # UI design spec (for projects with a UI)
     └── tasks/
         └── 000-template.md    # Task template
 ```
@@ -150,15 +151,24 @@ Use one file per task, named `NNN-short-name.md`, with sequential three-digit nu
 | Template field | What to include |
 | --- | --- |
 | `目标` — Goal | One small task with a clear, verifiable outcome |
+| `适用技能` — Skills | Optional; skill names and the step where each applies, read by the implementer before starting |
 | `允许改动文件` — Allowed files | One path, directory, or glob per line, preferably in backticks; `duo` checks scope against it |
 | `禁区` — Restricted areas | Paths in backticks are checked automatically; behavioral constraints are plain text |
-| `验收场景` — Acceptance scenarios | Inputs or actions and observable expected results, covering normal, error, and relevant regression cases |
+| `验收场景` — Acceptance scenarios | Inputs or actions and observable expected results, covering normal, error, and relevant regression cases; UI tasks add a visual item |
 | `验收命令` — Acceptance commands | Commands that can be run directly, with clear pass criteria |
 | `代码版本` — Code version | Filled in automatically by `duo start` / `duo handoff`; do not edit by hand |
 | `状态` — State | One of `待办`, `进行中`, `待验收`, or `完成` |
 | `备注` — Notes | Implementation details, verification results, or reasons for returning the task |
 
 See the full [task template](template/.work/tasks/000-template.md).
+
+### Frontend Tasks and Skills
+
+Passing builds and lint do not mean a page looks right or stays consistent. For projects with a UI:
+
+- **One design direction**: before the first frontend task, the architect fills in `.work/design.md` (direction, colors and typography, component conventions, things to avoid). Every implementer follows it.
+- **Named skills**: the task's `适用技能` field lists skill names and where they apply, such as `frontend-design` (aesthetic direction) or `ui-ux-pro-max` (palettes and UX checks). The implementer reads them before starting; if the current tool cannot find one, it notes this and follows `design.md`. Duo Kit does not bundle these skills; install them in Codex and Cursor separately.
+- **Visual review**: the visual acceptance item names pages, viewports, and what to compare. The implementer saves browser screenshots to `.work/evidence/<number>/`, and the architect reviews them against `design.md`. Screenshots are records: they do not need to be listed in allowed files and are excluded from scope checks.
 
 ### The `duo` Record-Keeping Command
 
