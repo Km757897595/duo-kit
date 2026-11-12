@@ -141,6 +141,21 @@ class ScriptTests(unittest.TestCase):
         self.assertFalse((self.root / ".codex").exists())
         self.assertEqual(list(self.project.iterdir()), [])
 
+    def test_init_skills_reports_installed_and_missing_without_side_effects(self):
+        result = self.run_script("duo-init", "--skills", "frontend", success=False)
+        self.assertIn("缺失: frontend-design", result.stdout)
+        self.assertIn("缺失: ui-ux-pro-max", result.stdout)
+        for path in (".claude/skills/frontend-design",
+                     ".cursor/plugins/cache/x/ui-ux-pro-max/1.0/skills/ui-ux-pro-max"):
+            (self.root / path).mkdir(parents=True)
+            (self.root / path / "SKILL.md").write_text("---\nname: x\n---\n")
+        result = self.run_script("duo-init", "--skills", "frontend")
+        self.assertIn(f"已安装: frontend-design  {self.root}/.claude/skills/frontend-design", result.stdout)
+        self.assertIn("已安装: ui-ux-pro-max", result.stdout)
+        self.assertEqual(list(self.project.iterdir()), [])
+        self.run_script("duo-init", "--skills", "backend", success=False)
+        self.run_script("duo-init", "--skills", success=False)
+
     def test_init_does_not_copy_finder_metadata(self):
         self.run_script("duo-init")
         self.assertFalse((self.project / ".DS_Store").exists())

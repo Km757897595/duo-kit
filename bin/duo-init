@@ -3,7 +3,41 @@
 set -euo pipefail
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$KIT/bin/duo-common.sh"
-USAGE='用法: duo-init [--update]。--update 备份并更新协作规则及 000-template.md;保留项目规范、计划、备注和实际任务。'
+USAGE='用法: duo-init [--update | --skills frontend]。--update 备份并更新协作规则及 000-template.md;保留项目规范、计划、备注和实际任务。--skills frontend 只检查本机是否已安装前端推荐 skill,不修改项目。'
+
+# 只按名称查找 SKILL.md,不安装、不链接;插件缓存目录层级不固定,用 find 搜索。
+check_skills() {
+  local names name paths missing=''
+  case "$1" in
+    frontend) names='frontend-design ui-ux-pro-max' ;;
+    *) echo "未知技能组: $1。可用: frontend。" >&2; return 2 ;;
+  esac
+  for name in $names; do
+    paths="$({
+      for d in .cursor/skills .claude/skills .agents/skills .codex/skills \
+               "$HOME/.cursor/skills" "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.codex/skills"; do
+        if [ -f "$d/$name/SKILL.md" ]; then echo "$d/$name"; fi
+      done
+      find "$HOME/.cursor/plugins" "$HOME/.claude/plugins" -maxdepth 9 -path "*/skills/$name/SKILL.md" 2>/dev/null \
+        | sed 's#/SKILL\.md$##'
+    } || true)"
+    if [ -n "$paths" ]; then
+      while IFS= read -r p; do echo "已安装: $name  $p"; done <<< "$paths"
+    else
+      echo "缺失: $name"; missing="$missing $name"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    echo "请在 Codex 与 Cursor 中安装缺失的 skill:${missing}。未安装时突击手会在备注说明并按 .work/design.md 执行。"
+    return 1
+  fi
+  echo "推荐 skill 均已找到。请确认 Codex 与 Cursor 各自能读取上述位置。"
+}
+
+if [ "${1:-}" = --skills ]; then
+  [ "$#" -eq 2 ] || { echo "$USAGE" >&2; exit 2; }
+  check_skills "$2"; exit
+fi
 duo_options "$@"
 SRC="$KIT/template"
 if [ "$UPDATE" -eq 1 ]; then duo_validate AGENTS.md; fi

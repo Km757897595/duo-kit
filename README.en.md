@@ -167,7 +167,7 @@ See the full [task template](template/.work/tasks/000-template.md).
 Passing builds and lint do not mean a page looks right or stays consistent. For projects with a UI:
 
 - **One design direction**: before the first frontend task, the architect fills in `.work/design.md` (direction, colors and typography, component conventions, things to avoid). Every implementer follows it.
-- **Named skills**: the task's `适用技能` field lists skill names and where they apply, such as `frontend-design` (aesthetic direction) or `ui-ux-pro-max` (palettes and UX checks). The implementer reads them before starting; if the current tool cannot find one, it notes this and follows `design.md`. Duo Kit does not bundle these skills; install them in Codex and Cursor separately.
+- **Named skills**: the task's `适用技能` field lists skill names and where they apply, such as `frontend-design` (aesthetic direction) or `ui-ux-pro-max` (palettes and UX checks). The implementer reads them before starting; if the current tool cannot find one, it notes this and follows `design.md`. Duo Kit does not bundle these skills; install them in Codex and Cursor separately. Run `duo-init --skills frontend` to see which recommended skills are installed or missing (check only, no project changes; exits non-zero when any are missing).
 - **Visual review**: the visual acceptance item names pages, viewports, and what to compare. The implementer saves browser screenshots to `.work/evidence/<number>/`, and the architect reviews them against `design.md`. Screenshots are records: they do not need to be listed in allowed files and are excluded from scope checks.
 
 ### The `duo` Record-Keeping Command
@@ -223,6 +223,7 @@ duo-init --update
 | `duo-install` | Updates the global `DUO-KIT` block; skips existing prompt files |
 | `duo-install --update` | Updates the global block and backs up then replaces the existing `~/.codex/prompts/duo.md` |
 | `duo-init` | Creates missing files; skips existing files |
+| `duo-init --skills frontend` | Only checks whether recommended frontend skills are installed; no project changes |
 | `duo-init --update` | Updates the collaboration block in project `AGENTS.md`, backs up then replaces `.cursor/rules/main.mdc` and `.work/tasks/000-template.md`, and creates missing template files |
 
 - Changed files are backed up alongside the originals as `filename.duo-backup.random-suffix`. Identical files are skipped without new backups. Restore manually from a backup if needed; backups may contain personal rules, so consider adding them to your project's `.gitignore`.
