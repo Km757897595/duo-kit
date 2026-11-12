@@ -167,7 +167,16 @@ Codex 先运行 `duo check 001` 核对交接版本未变化、改动未越界，
 构建和 lint 通过不代表页面好看、风格统一。有界面的项目按以下方式约束前端任务：
 
 - **统一设计方向**：架构师在首个前端任务前填写 `.work/design.md`（设计方向、配色字体、组件约定、禁止事项），之后所有突击手共同遵守。
-- **指定技能**：任务单「适用技能」写明 skill 名称和使用环节，例如 `frontend-design`（确定审美方向）、`ui-ux-pro-max`（配色与 UX 检查）。突击手开工前先读取；当前工具找不到时在备注说明，并按 `design.md` 执行。Duo Kit 不附带这些 skill，请在 Codex 和 Cursor 中分别安装；可运行 `duo-init --skills frontend` 检查本机已安装和缺失的推荐 skill（只检查，不修改项目，有缺失时退出码非零）。
+- **指定技能**：任务单「适用技能」写明 skill 名称和使用环节，例如 `frontend-design`（确定审美方向）、`ui-ux-pro-max`（配色与 UX 检查）、`hallmark`（新页面设计与设计审查）。突击手开工前先读取；当前工具找不到时在备注说明，并按 `design.md` 执行。
+- **安装与更新**：Duo Kit 不附带这些 skill，用以下命令管理（都不修改项目文件）：
+
+  | 命令 | 作用 |
+  | --- | --- |
+  | `duo-init --skills frontend` | 检查推荐 skill 是否已安装并列出位置，有缺失时退出码非零 |
+  | `duo-init --skills frontend --install` | 通过 `npx skills` 为 Codex 和 Cursor 全局安装缺失的 skill（装到 `~/.agents/skills`），已安装的跳过 |
+  | `duo-init --skills frontend --update` | 通过 `npx skills update` 更新推荐 skill；只能更新经 `skills` 工具安装的，插件或其他工具管理的需在原工具中更新 |
+
+  安装和更新需要 Node.js，会从 GitHub 拉取第三方 skill，使用前请审阅内容。
 - **视觉验收**：验收场景的视觉项写明页面、视口和对照要点。突击手在浏览器中截图存入 `.work/evidence/<编号>/`，架构师对照 `design.md` 审阅。截图属于记录文件，不需要写进「允许改动文件」，也不参与范围校验。
 
 ### `duo` 记账命令
@@ -223,7 +232,7 @@ duo-init --update
 | `duo-install` | 更新全局 `DUO-KIT` 标记块；已有提示词文件仍跳过 |
 | `duo-install --update` | 更新全局标记块，并备份后替换已有 `~/.codex/prompts/duo.md` |
 | `duo-init` | 只创建缺失文件，已有文件跳过 |
-| `duo-init --skills frontend` | 只检查前端推荐 skill 是否已安装，不修改项目 |
+| `duo-init --skills frontend [--install \| --update]` | 检查、安装或更新前端推荐 skill，不修改项目 |
 | `duo-init --update` | 更新项目 `AGENTS.md` 的协作标记块，并备份后替换 `.cursor/rules/main.mdc` 和 `.work/tasks/000-template.md`；创建缺失的模板文件 |
 
 - 每次实际修改已有文件前，在同目录生成 `原文件名.duo-backup.随机后缀` 备份；内容相同则跳过，不重复备份。可手动从备份恢复；备份可能包含个人规范，请按项目需要加入 `.gitignore`。

@@ -3,40 +3,82 @@
 set -euo pipefail
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$KIT/bin/duo-common.sh"
-USAGE='用法: duo-init [--update | --skills frontend]。--update 备份并更新协作规则及 000-template.md;保留项目规范、计划、备注和实际任务。--skills frontend 只检查本机是否已安装前端推荐 skill,不修改项目。'
+USAGE='用法: duo-init [--update | --skills frontend [--install | --update]]。
+  --update                   备份并更新协作规则及 000-template.md;保留项目规范、计划、备注和实际任务。
+  --skills frontend          检查本机是否已安装前端推荐 skill,不修改项目。
+  --skills frontend --install  用 npx skills 为 Codex 与 Cursor 全局安装缺失的推荐 skill。
+  --skills frontend --update   用 npx skills 更新推荐 skill;只能更新经 skills 工具安装的。'
 
-# 只按名称查找 SKILL.md,不安装、不链接;插件缓存目录层级不固定,用 find 搜索。
-check_skills() {
-  local names name paths missing=''
+# 每行「skill 名称 上游仓库」。
+skill_group() {
   case "$1" in
-    frontend) names='frontend-design ui-ux-pro-max' ;;
+    frontend) printf '%s\n' 'frontend-design anthropics/skills' \
+                'ui-ux-pro-max nextlevelbuilder/ui-ux-pro-max-skill' 'hallmark nutlope/hallmark' ;;
     *) echo "未知技能组: $1。可用: frontend。" >&2; return 2 ;;
   esac
-  for name in $names; do
-    paths="$({
-      for d in .cursor/skills .claude/skills .agents/skills .codex/skills \
-               "$HOME/.cursor/skills" "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.codex/skills"; do
-        if [ -f "$d/$name/SKILL.md" ]; then echo "$d/$name"; fi
-      done
-      find "$HOME/.cursor/plugins" "$HOME/.claude/plugins" -maxdepth 9 -path "*/skills/$name/SKILL.md" 2>/dev/null \
-        | sed 's#/SKILL\.md$##'
-    } || true)"
+}
+
+# 只按名称查找 SKILL.md;插件缓存目录层级不固定,用 find 搜索。
+skill_paths() {
+  {
+    for d in .cursor/skills .claude/skills .agents/skills .codex/skills \
+             "$HOME/.cursor/skills" "$HOME/.claude/skills" "$HOME/.agents/skills" "$HOME/.codex/skills"; do
+      if [ -f "$d/$1/SKILL.md" ]; then echo "$d/$1"; fi
+    done
+    find "$HOME/.cursor/plugins" "$HOME/.claude/plugins" -maxdepth 9 -path "*/skills/$1/SKILL.md" 2>/dev/null \
+      | sed 's#/SKILL\.md$##'
+  } || true
+}
+
+check_skills() {
+  local name repo paths missing=''
+  while read -r name repo; do
+    paths="$(skill_paths "$name")"
     if [ -n "$paths" ]; then
       while IFS= read -r p; do echo "已安装: $name  $p"; done <<< "$paths"
     else
       echo "缺失: $name"; missing="$missing $name"
     fi
-  done
+  done <<< "$1"
   if [ -n "$missing" ]; then
-    echo "请在 Codex 与 Cursor 中安装缺失的 skill:${missing}。未安装时突击手会在备注说明并按 .work/design.md 执行。"
+    echo "缺失 skill:${missing}。可运行 duo-init --skills $2 --install 安装;未安装时突击手会在备注说明并按 .work/design.md 执行。"
     return 1
   fi
   echo "推荐 skill 均已找到。请确认 Codex 与 Cursor 各自能读取上述位置。"
 }
 
+need_npx() {
+  command -v npx >/dev/null 2>&1 || { echo "错误: 未找到 npx,请先安装 Node.js。" >&2; exit 1; }
+}
+
+install_skills() {
+  local name repo
+  need_npx
+  while read -r name repo; do
+    if [ -n "$(skill_paths "$name")" ]; then echo "跳过(已安装): $name"; continue; fi
+    echo "安装: $name ← $repo"
+    npx -y skills add "$repo" -g -s "$name" -a codex cursor -y
+  done <<< "$1"
+  echo "完成。请运行 duo-init --skills $2 复查,并在使用前审阅 skill 内容。"
+}
+
+update_skills() {
+  need_npx
+  # shellcheck disable=SC2046
+  npx -y skills update -g -y $(cut -d' ' -f1 <<< "$1")
+  echo "非 skills 工具安装的 skill(如插件或其他工具管理的)不会被更新,请在原工具中更新。"
+}
+
 if [ "${1:-}" = --skills ]; then
-  [ "$#" -eq 2 ] || { echo "$USAGE" >&2; exit 2; }
-  check_skills "$2"; exit
+  [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { echo "$USAGE" >&2; exit 2; }
+  group="$(skill_group "$2")" || exit 2
+  case "${3:-}" in
+    '') check_skills "$group" "$2" ;;
+    --install) install_skills "$group" "$2" ;;
+    --update) update_skills "$group" ;;
+    *) echo "未知参数: $3。$USAGE" >&2; exit 2 ;;
+  esac
+  exit
 fi
 duo_options "$@"
 SRC="$KIT/template"

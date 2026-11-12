@@ -145,7 +145,8 @@ class ScriptTests(unittest.TestCase):
         result = self.run_script("duo-init", "--skills", "frontend", success=False)
         self.assertIn("缺失: frontend-design", result.stdout)
         self.assertIn("缺失: ui-ux-pro-max", result.stdout)
-        for path in (".claude/skills/frontend-design",
+        self.assertIn("缺失: hallmark", result.stdout)
+        for path in (".claude/skills/frontend-design", ".agents/skills/hallmark",
                      ".cursor/plugins/cache/x/ui-ux-pro-max/1.0/skills/ui-ux-pro-max"):
             (self.root / path).mkdir(parents=True)
             (self.root / path / "SKILL.md").write_text("---\nname: x\n---\n")
@@ -155,6 +156,30 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(list(self.project.iterdir()), [])
         self.run_script("duo-init", "--skills", "backend", success=False)
         self.run_script("duo-init", "--skills", success=False)
+        self.run_script("duo-init", "--skills", "frontend", "--typo", success=False)
+
+    def mock_npx(self):
+        log = self.root / "npx.log"
+        npx = self.root / "bin/npx"
+        npx.write_text(f'#!/bin/sh\necho "$*" >> "{log}"\n')
+        npx.chmod(0o755)
+        return log
+
+    def test_init_skills_install_only_missing_and_update_all(self):
+        log = self.mock_npx()
+        (self.root / ".claude/skills/frontend-design").mkdir(parents=True)
+        (self.root / ".claude/skills/frontend-design/SKILL.md").write_text("x\n")
+        self.run_script("duo-init", "--skills", "frontend", "--install")
+        calls = log.read_text().splitlines()
+        self.assertEqual(calls, [
+            "-y skills add nextlevelbuilder/ui-ux-pro-max-skill -g -s ui-ux-pro-max -a codex cursor -y",
+            "-y skills add nutlope/hallmark -g -s hallmark -a codex cursor -y",
+        ])
+        log.unlink()
+        self.run_script("duo-init", "--skills", "frontend", "--update")
+        self.assertEqual(log.read_text().splitlines(),
+                         ["-y skills update -g -y frontend-design ui-ux-pro-max hallmark"])
+        self.assertEqual(list(self.project.iterdir()), [])
 
     def test_init_does_not_copy_finder_metadata(self):
         self.run_script("duo-init")
