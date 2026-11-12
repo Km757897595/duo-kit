@@ -30,4 +30,5 @@ if command -v pbcopy >/dev/null 2>&1; then
 else
   echo "(未找到 pbcopy,已跳过复制,请手动打开上述文件复制。)"
 fi
-echo "提示:可把 $KIT/bin 加入 PATH,以便在任意项目运行 duo-init。"
+echo "提示:把 $KIT/bin 加入 PATH,以便在任意项目运行 duo-init,并让 Agent 能调用 duo 记账命令。"
+if ! command -v duo >/dev/null 2>&1; then echo "警告:当前 PATH 中找不到 duo,协作流程中的记账步骤将无法执行。"; fi

@@ -145,6 +145,83 @@ class ScriptTests(unittest.TestCase):
         self.run_script("duo-init")
         self.assertFalse((self.project / ".DS_Store").exists())
 
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                       cwd=self.project, env=self.env, check=True, capture_output=True)
+
+    def new_task(self, allow="- `src/`\n- app.txt(说明)\n", deny="- `src/secret.txt`\n- 不改接口\n"):
+        path = self.project / self.run_script("duo", "new", "登录 校验").stdout.strip()
+        text = path.read_text().replace("## 允许改动文件\n", "## 允许改动文件\n" + allow, 1)
+        path.write_text(text.replace("## 禁区\n", "## 禁区\n" + deny, 1))
+        return path
+
+    def test_duo_git_flow_records_versions_and_detects_later_changes(self):
+        (self.project / "app.txt").write_text("v1\n")
+        (self.project / "pre.txt").write_text("v1\n")
+        self.git("init", "-q")
+        self.git("add", ".")
+        self.git("commit", "-qm", "init")
+        self.run_script("duo-init")
+        task = self.new_task()
+        self.assertEqual(task.name, "001-登录-校验.md")
+        (self.project / "pre.txt").write_text("用户已有改动\n")
+        self.run_script("duo", "start", "1")
+        text = task.read_text()
+        self.assertIn("进行中", text)
+        self.assertRegex(text, r"- 基础提交:[0-9a-f]{40}\n")
+        self.assertIn("  - `pre.txt`", text)
+        (self.project / "src").mkdir()
+        (self.project / "src/new.txt").write_text("新文件\n")
+        (self.project / "app.txt").write_text("v2\n")
+        self.run_script("duo", "handoff", "1")
+        text = task.read_text()
+        self.assertIn("待验收", text)
+        self.assertRegex(text, r"  - `app.txt` [0-9a-f]{64}\n")
+        self.assertIn("  - `src/new.txt` ", text)
+        self.assertNotIn("`pre.txt` ", text)
+        self.run_script("duo", "check", "1")
+        self.assertIn("001\t待验收\t登录 校验", self.run_script("duo", "status").stdout)
+        (self.project / "app.txt").write_text("v3\n")
+        result = self.run_script("duo", "check", "1", success=False)
+        self.assertIn("交接后代码有变化", result.stdout)
+
+    def test_duo_handoff_rejects_out_of_scope_and_forbidden_files(self):
+        self.git("init", "-q")
+        (self.project / "app.txt").write_text("v1\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "init")
+        self.run_script("duo-init")
+        task = self.new_task()
+        self.run_script("duo", "start", "001")
+        (self.project / "src").mkdir()
+        (self.project / "src/secret.txt").write_text("x\n")
+        (self.project / "other.txt").write_text("x\n")
+        result = self.run_script("duo", "handoff", "1", success=False)
+        self.assertIn("other.txt 不在「允许改动文件」中", result.stdout)
+        self.assertIn("src/secret.txt 命中「禁区」", result.stdout)
+        self.assertIn("进行中", task.read_text())
+
+    def test_duo_without_git_uses_full_snapshot(self):
+        self.run_script("duo-init")
+        (self.project / "app.txt").write_text("v1\n")
+        task = self.new_task()
+        self.run_script("duo", "start", "1")
+        self.assertIn("- 基础提交:无 Git", task.read_text())
+        (self.project / "app.txt").write_text("v2\n")
+        self.run_script("duo", "handoff", "1")
+        self.assertRegex(task.read_text(), r"  - `app.txt` [0-9a-f]{64}\n")
+        self.run_script("duo", "check", "1")
+        (self.project / "app.txt").unlink()
+        self.run_script("duo", "check", "1", success=False)
+
+    def test_duo_refuses_template_and_finished_tasks(self):
+        self.run_script("duo-init")
+        task = self.new_task()
+        self.run_script("duo", "start", "0", success=False)
+        task.write_text(task.read_text().replace("\n待办\n", "\n完成\n"))
+        self.run_script("duo", "start", "1", success=False)
+        self.assertEqual(self.new_task().name, "002-登录-校验.md")
+
 
 if __name__ == "__main__":
     unittest.main()

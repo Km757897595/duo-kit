@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# Duo Kit 任务记账:新建任务单、记录基础与交接版本、校验改动范围、汇总状态。
+set -euo pipefail
+USAGE='用法: duo <new 名称 | start 编号 | handoff 编号 | check 编号 | status>
+  new      按 000-template.md 创建下一个编号的任务单
+  start    突击手开工:记录工作目录、分支、基础提交与执行前已有改动,置为「进行中」
+  handoff  突击手交接:校验改动范围,记录交接 HEAD、本任务提交与未提交文件 SHA-256,置为「待验收」
+  check    架构师验收前核对:交接后代码未变化、改动未越界,并列出需审阅的改动
+  status   汇总全部任务单状态并给出下一步'
+
+die() { echo "错误: $*" >&2; exit 1; }
+
+find_root() {
+  local d; d="$(pwd -P)"
+  while :; do
+    if [ -d "$d/.work/tasks" ]; then echo "$d"; return; fi
+    [ "$d" != / ] || die "未找到 .work/tasks,请先在项目根目录运行 duo-init。"
+    d="$(dirname "$d")"
+  done
+}
+
+in_git() { git rev-parse --is-inside-work-tree >/dev/null 2>&1; }
+has_head() { git rev-parse --verify -q HEAD >/dev/null 2>&1; }
+is_sha() { [[ "$1" =~ ^[0-9a-f]{40,64}$ ]]; }
+untracked() { git ls-files -z -o --exclude-standard | tr '\0' '\n'; }
+dirty() { git diff -z --name-only --no-renames --relative "$1" | tr '\0' '\n'; untracked; }
+
+all_files() {
+  if in_git; then git ls-files -z -co --exclude-standard | tr '\0' '\n'
+  else find . -type f ! -path './.git/*' ! -path '*/node_modules/*' ! -name .DS_Store | sed 's#^\./##'; fi
+}
+
+branch_name() {
+  if in_git; then git symbolic-ref --short -q HEAD || echo "detached HEAD"; else echo "无 Git"; fi
+}
+
+hash_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
+}
+
+# stdin 每行一个路径;输出「SHA-256 或 DELETED<TAB>路径」,去重排序。
+states() {
+  local p
+  LC_ALL=C sort -u | while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if [ -f "$p" ]; then printf '%s\t%s\n' "$(hash_file "$p")" "$p"
+    elif [ -e "$p" ]; then printf 'OTHER\t%s\n' "$p"
+    else printf 'DELETED\t%s\n' "$p"; fi
+  done
+}
+
+# 当前任务单、备注与快照属于记录文件,不计入代码改动。
+not_records() {
+  awk -F'\t' -v t="$TASK" '{p=$NF} p!=t && p!=".work/notes.md" && index(p, ".work/snapshots/")!=1'
+}
+
+# 本任务相对基础的改动;执行前已有且之后未再变化的文件不计入。
+changes() {
+  local base="$1" snap="$2"
+  { if is_sha "$base"; then dirty "$base"; else all_files; fi; cut -f2- "$snap"; } \
+    | not_records | states \
+    | awk -F'\t' 'FILENAME==ARGV[1] {b[$2]=$1; next} !($2 in b) || b[$2]!=$1' "$snap" -
+}
+
+load_task() {
+  local n="$1" matches
+  [[ "$n" =~ ^[0-9]+$ ]] || die "编号应为数字: $n"
+  NUM="$(printf '%03d' "$((10#$n))")"
+  [ "$NUM" != 000 ] || die "000-template.md 是模板,不能执行或验收。"
+  matches=( .work/tasks/"$NUM"-*.md )
+  [ -e "${matches[0]}" ] || die "未找到任务 ${NUM}。"
+  [ "${#matches[@]}" -eq 1 ] || die "任务 $NUM 匹配多个文件: ${matches[*]}"
+  TASK="${matches[0]}"
+  local k
+  for k in 工作目录 分支 基础提交 执行前已有改动 "交接 HEAD" 未提交代码文件; do
+    grep -q "^- $k" "$TASK" || die "$TASK 缺少「代码版本」字段「${k}」,请架构师按 000-template.md 补充。"
+  done
+}
+
+get_status() { awk '/^## /{sec=($0=="## 状态"); next} sec && NF && !/^<!--/ {print; exit}' "$1"; }
+
+set_status() {
+  awk -v v="$1" '/^## /{sec=($0=="## 状态"); print; next}
+    sec && !done && NF && !/^<!--/ {print v; done=1; next} {print}' "$TASK" > "$WORK/task"
+  cat "$WORK/task" > "$TASK"
+}
+
+get_field() {
+  awk -v k="- $1" 'index($0,k)==1 {v=substr($0, index($0,":")+1); sub(/^ +/, "", v); print v; exit}' "$TASK"
+}
+
+# 写入「- 字段:值」,可选第三个参数为子项文件,替换该字段下原有的「  - 」子项。
+set_field() {
+  awk -v k="- $1" -v v="$2" -v subs="${3:-/dev/null}" '
+    skip && /^  - / {next}
+    {skip=0}
+    index($0,k)==1 && !done {
+      print substr($0, 1, index($0,":")) v
+      while ((getline l < subs) > 0) print "  - " l
+      close(subs); skip=1; done=1; next
+    }
+    {print}' "$TASK" > "$WORK/task"
+  cat "$WORK/task" > "$TASK"
+}
+
+# 允许文件取反引号内路径,无反引号取首个词;禁区只取反引号内路径,其余视为行为约束。
+patterns() {
+  awk -v s="## $1" -v strict="$2" '
+    /^## /{sec=($0==s); next}
+    sec && /^[-*] / {
+      line=substr($0, 3)
+      if (line ~ /`[^`]+`/) {
+        while (match(line, /`[^`]+`/)) { print substr(line, RSTART+1, RLENGTH-2); line=substr(line, RSTART+RLENGTH) }
+      } else if (!strict) {
+        split(line, a, /[ \t]/); p=a[1]; sub(/\(.*/, "", p)
+        i=index(p, "（"); if (i) p=substr(p, 1, i-1)
+        if (p!="") print p
+      }
+    }' "$TASK"
+}
+
+path_match() {
+  local p="$1" pat="${2#./}"
+  pat="${pat%/}"
+  [[ "$p" == $pat || "$p" == "$pat"/* ]]
+}
+
+scope_check() {
+  local allow deny p pat ok bad=0
+  allow="$(patterns 允许改动文件 0)"; deny="$(patterns 禁区 1)"
+  while IFS=$'\t' read -r _ p; do
+    ok=0
+    while IFS= read -r pat; do
+      if [ -n "$pat" ] && path_match "$p" "$pat"; then ok=1; break; fi
+    done <<< "$allow"
+    [ "$ok" -eq 1 ] || { echo "越界: $p 不在「允许改动文件」中"; bad=1; }
+    while IFS= read -r pat; do
+      if [ -n "$pat" ] && path_match "$p" "$pat"; then echo "越界: $p 命中「禁区」$pat"; bad=1; fi
+    done <<< "$deny"
+  done < "$1"
+  return "$bad"
+}
+
+list_changes() {
+  if [ -s "$1" ]; then
+    awk -F'\t' '{print "  " ($1=="DELETED" ? "删除" : "改动") "  " $2}' "$1"
+  else echo "  (无)"; fi
+}
+
+cmd_new() {
+  [ "$#" -ge 1 ] || die "缺少任务名称。"
+  local name="$*" tpl=.work/tasks/000-template.md last next dest
+  [ -f "$tpl" ] || die "缺少 $tpl,请运行 duo-init。"
+  last="$(ls .work/tasks | sed -n 's/^\([0-9][0-9][0-9]\)-.*\.md$/\1/p' | sort -n | tail -n 1)"
+  next="$(printf '%03d' "$((10#${last:-0} + 1))")"
+  dest=".work/tasks/$next-$(printf '%s' "$name" | tr ' /' '--').md"
+  awk -v t="# 任务 $next:$name" 'NR==1 {print t; next} {print}' "$tpl" > "$WORK/task"
+  ( set -C; cat "$WORK/task" > "$dest" ) 2>/dev/null || die "$dest 已存在,请重试。"
+  echo "$dest"
+}
+
+cmd_start() {
+  load_task "$1"
+  local st base snap=".work/snapshots/$NUM-base.tsv" n
+  st="$(get_status "$TASK")"
+  case "$st" in 待办|进行中) ;; *) die "任务 $NUM 状态为「${st}」,只执行待办或进行中任务;如需重做请架构师重新打开。" ;; esac
+  base="$(get_field 基础提交)"
+  if [ -n "$base" ]; then
+    [ -f "$snap" ] || die "任务 $NUM 已记录基础提交但缺少 $snap,请交回架构师确认后重新交接。"
+    set_status 进行中
+    echo "继续执行任务 $NUM:保留原基础 ${base}。"
+    return
+  fi
+  mkdir -p .work/snapshots
+  if in_git && has_head; then
+    base="$(git rev-parse HEAD)"
+    dirty HEAD | not_records | states > "$snap"
+    n=$(( $(wc -l < "$snap") ))
+    cut -f2- "$snap" | sed 's/.*/`&`/' > "$WORK/subs"
+    set_field 执行前已有改动 "$([ "$n" -eq 0 ] && echo 无 || echo "$n 个(交接时未再变化的不计入本任务)")" "$WORK/subs"
+  else
+    if in_git; then base=无初始提交; else base="无 Git"; fi
+    all_files | not_records | states > "$snap"
+    set_field 执行前已有改动 "全量快照 $(( $(wc -l < "$snap") )) 个文件,见 $snap"
+  fi
+  set_field 工作目录 "$ROOT"
+  set_field 分支 "$(branch_name)"
+  set_field 基础提交 "$base"
+  set_status 进行中
+  echo "任务 $NUM 已开工:基础 $base,快照 ${snap}。"
+}
+
+cmd_handoff() {
+  load_task "$1"
+  local st base snap=".work/snapshots/$NUM-base.tsv" head=无提交 commits=无 n
+  st="$(get_status "$TASK")"
+  [ "$st" = 进行中 ] || die "任务 $NUM 状态为「${st}」,只有进行中的任务可以交接。"
+  base="$(get_field 基础提交)"
+  [ -n "$base" ] && [ -f "$snap" ] || die "缺少基础记录,请先运行 duo start ${NUM}。"
+  changes "$base" "$snap" > "$WORK/cur"
+  echo "本任务改动:"; list_changes "$WORK/cur"
+  scope_check "$WORK/cur" || die "存在越界改动,任务保持「进行中」;请撤回越界改动,或交回架构师调整范围。"
+  cp "$WORK/cur" ".work/snapshots/$NUM-handoff.tsv"
+  if in_git && has_head; then
+    head="$(git rev-parse HEAD)"
+    dirty HEAD > "$WORK/pending"
+    if is_sha "$base"; then
+      commits="$(git log --format=%h "$base..HEAD" | tr '\n' ' ' | sed 's/ $//')"
+      [ -n "$commits" ] || commits=无
+    fi
+  else
+    cut -f2- "$WORK/cur" > "$WORK/pending"
+  fi
+  awk -F'\t' 'FILENAME==ARGV[1] {u[$0]=1; next} ($2 in u) {print "`" $2 "` " ($1=="DELETED" ? "删除" : $1)}' \
+    "$WORK/pending" "$WORK/cur" > "$WORK/subs"
+  n=$(( $(wc -l < "$WORK/subs") ))
+  set_field "交接 HEAD" "$head / $commits"
+  set_field 未提交代码文件 "$([ "$n" -eq 0 ] && echo 无 || echo "$n 个")" "$WORK/subs"
+  set_status 待验收
+  echo "任务 $NUM 已交接,状态改为「待验收」。请回到架构师聊天发送 /duo 验收 ${NUM}。"
+}
+
+cmd_check() {
+  load_task "$1"
+  local fail=0 st dir br base head now hsnap=".work/snapshots/$NUM-handoff.tsv" snap=".work/snapshots/$NUM-base.tsv"
+  bad() { echo "✗ $*"; fail=1; }
+  st="$(get_status "$TASK")"
+  [ "$st" = 待验收 ] || bad "状态为「${st}」,只验收待验收任务。"
+  dir="$(get_field 工作目录)"; [ "$dir" = "$ROOT" ] || bad "工作目录不一致:记录 $dir,当前 ${ROOT}。"
+  br="$(get_field 分支)"; [ "$br" = "$(branch_name)" ] || bad "分支不一致:记录 $br,当前 $(branch_name)。"
+  base="$(get_field 基础提交)"; head="$(get_field "交接 HEAD")"; head="${head%% /*}"
+  if [ ! -f "$hsnap" ] || [ ! -f "$snap" ] || [ -z "$base" ]; then
+    bad "缺少基础或交接记录,请突击手运行 duo start / duo handoff。"; exit 1
+  fi
+  if in_git && has_head; then now="$(git rev-parse HEAD)"; else now=无提交; fi
+  [ "$head" = "$now" ] || bad "HEAD 在交接后变化:交接 $head,当前 ${now}。"
+  changes "$base" "$snap" > "$WORK/cur"
+  if ! cmp -s "$hsnap" "$WORK/cur"; then
+    bad "交接后代码有变化,需重新交接:"
+    awk -F'\t' 'FILENAME==ARGV[1] {h[$2]=$1; next} {c[$2]=$1}
+      END {for (p in h) if (!(p in c) || c[p]!=h[p]) print "    " p; for (p in c) if (!(p in h)) print "    " p}' \
+      "$hsnap" "$WORK/cur" | LC_ALL=C sort
+  fi
+  scope_check "$WORK/cur" || bad "改动越界。"
+  echo "本任务改动:"; list_changes "$WORK/cur"
+  if is_sha "$base"; then
+    [ "$base" = "$head" ] || echo "审阅已提交部分: git diff $base $head"
+    echo "审阅未提交部分: git diff --cached、git diff,新增文件逐个读取。"
+  else
+    echo "审阅: 无提交间 diff,请逐个读取上述文件(基础快照 $snap)。"
+  fi
+  if [ "$fail" -ne 0 ]; then echo "核对未通过:不得宣称验收通过。"; exit 1; fi
+  echo "✓ 交接版本与范围核对通过。继续审阅改动,亲自运行验收命令并逐项验证验收场景。"
+}
+
+cmd_status() {
+  local f n st title todo='' doing='' review=''
+  printf '编号\t状态\t标题\n'
+  for f in .work/tasks/[0-9][0-9][0-9]-*.md; do
+    [ -e "$f" ] || continue
+    n="$(basename "$f")"; n="${n%%-*}"
+    [ "$n" != 000 ] || continue
+    st="$(get_status "$f")"
+    title="$(awk 'NR==1 {sub(/^# *(任务 *[0-9]+ *(:|：) *)?/, ""); print; exit}' "$f")"
+    printf '%s\t%s\t%s\n' "$n" "${st:-未知}" "$title"
+    case "$st" in
+      待验收) review="${review:-$n}" ;; 进行中) doing="${doing:-$f}" ;; 待办) todo="${todo:-$f}" ;;
+    esac
+  done
+  if [ -n "$review" ]; then echo "下一步:在架构师聊天发送 /duo 验收 $review"
+  elif [ -n "$doing" ]; then echo "下一步:让突击手继续执行 $doing"
+  elif [ -n "$todo" ]; then echo "下一步:让突击手执行 $todo"
+  else echo "下一步:没有未完成任务,可发送 /duo <需求> 规划新任务。"; fi
+}
+
+case "${1:-}" in
+  -h|--help) echo "$USAGE"; exit 0 ;;
+  new|start|handoff|check|status) ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
+esac
+cmd="$1"; shift
+case "$cmd" in
+  start|handoff|check) [ "$#" -eq 1 ] || die "duo $cmd 需要一个任务编号。" ;;
+  status) [ "$#" -eq 0 ] || die "duo status 不接受参数。" ;;
+esac
+ROOT="$(find_root)"
+cd "$ROOT"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+TASK=''
+"cmd_$cmd" "$@"

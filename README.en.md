@@ -16,6 +16,8 @@ Use Codex directly for everyday work. When you want to split responsibilities, i
 - **Define clear boundaries:** Each task file lists its goal, allowed files, restricted areas, and acceptance commands.
 - **Keep handoffs traceable:** Plans, task states, and findings outside the task scope live in `.work/`, without requiring shared chat history.
 - **Review after implementation:** The implementer runs its checks and marks the task ready for review. Codex inspects the changes and runs the acceptance commands itself.
+- **Let scripts keep the records:** Base commits, handoff HEAD, file SHA-256 hashes, and scope checks are recorded and verified by the `duo` command; agents never hand-write hashes.
+- **Keep one copy of the protocol:** The protocol text lives only in the marked block of the project `AGENTS.md`; global rules just trigger collaboration and point to it.
 - **Run setup again safely:** Global instructions are updated within a marked block, and project initialization skips existing files.
 
 ## Prerequisites
@@ -33,7 +35,7 @@ The toolkit requires no additional package dependencies. macOS is the intended e
 Download or clone this repository, then run the following from its `duo-kit` directory:
 
 ```bash
-chmod +x bin/duo-install bin/duo-init
+chmod +x bin/duo bin/duo-install bin/duo-init
 ./bin/duo-install
 ```
 
@@ -55,7 +57,7 @@ source ~/.zshrc
 command -v duo-init
 ```
 
-The final command should print the path to `duo-init`. If you use another shell, update its configuration file instead. If you move the toolkit, update PATH accordingly.
+The final command should print the path to `duo-init`. If you use another shell, update its configuration file instead. If you move the toolkit, update PATH accordingly. During collaboration, the Codex and Cursor agents call the `duo` command, so make sure their terminals can find it too.
 
 ### 2. Initialize your project
 
@@ -109,7 +111,7 @@ Collaboration mode applies only to the current message containing `/duo`. Includ
 /duo Add request validation to the login endpoint, follow the existing API format, and add tests.
 ```
 
-Codex reads the project rules, plan, and notes, then creates task files from the template. For example, `.work/tasks/001-login-validation.md` would define the allowed scope, behavioral acceptance scenarios, and executable acceptance commands.
+Codex reads the project rules, plan, and notes, then creates task files from the template with `duo new`. For example, `.work/tasks/001-login-validation.md` would define the allowed scope, behavioral acceptance scenarios, and executable acceptance commands.
 
 **Step 2: Ask Cursor or Codex to implement the task.** Open the same project in Cursor and give its Agent the actual task file path:
 
@@ -123,7 +125,7 @@ Alternatively, open the same project in another Codex chat and send:
 /duo 执行 001
 ```
 
-The implementer first records the base commit and pre-existing changes, then sets the state to `进行中` (In progress), implements within the allowed scope, runs the acceptance commands, and checks each acceptance scenario. Once all checks pass, it records the handoff code version and sets the state to `待验收` (Ready for review). Findings outside the scope go in `.work/notes.md`.
+The implementer first runs `duo start 001`, which records the base commit and pre-existing changes and sets the state to `进行中` (In progress). It then implements within the allowed scope, runs the acceptance commands, and checks each acceptance scenario. Once all checks pass, it runs `duo handoff 001`, which checks the scope, records the handoff code version, and sets the state to `待验收` (Ready for review). Findings outside the scope go in `.work/notes.md`.
 
 **Step 3: Ask Codex to review.** Return to Codex and send:
 
@@ -131,7 +133,7 @@ The implementer first records the base commit and pre-existing changes, then set
 /duo 验收 001
 ```
 
-Codex verifies the handoff code version, inspects committed, staged, unstaged, and untracked changes, checks file boundaries and architecture constraints, and runs the acceptance commands and verifies each scenario itself. If they pass, it marks the task `完成` (Done) and updates the plan. Otherwise, it returns the task to `进行中` (In progress), records the issues, and you hand it back to the implementer for corrections.
+Codex runs `duo check 001` to confirm the handoff code is unchanged and within scope, reviews the listed changes and architecture constraints, and runs the acceptance commands and verifies each scenario itself. If they pass, it marks the task `完成` (Done) and updates the plan. Otherwise, it returns the task to `进行中` (In progress), records the issues, and you hand it back to the implementer for corrections.
 
 ```text
 待办 (To do) → 进行中 (In progress) → 待验收 (Ready for review) → 完成 (Done)
@@ -148,38 +150,48 @@ Use one file per task, named `NNN-short-name.md`, with sequential three-digit nu
 | Template field | What to include |
 | --- | --- |
 | `目标` — Goal | One small task with a clear, verifiable outcome |
-| `允许改动文件` — Allowed files | Specific file paths or directories |
-| `禁区` — Restricted areas | Files or behavior that must not be changed |
+| `允许改动文件` — Allowed files | One path, directory, or glob per line, preferably in backticks; `duo` checks scope against it |
+| `禁区` — Restricted areas | Paths in backticks are checked automatically; behavioral constraints are plain text |
 | `验收场景` — Acceptance scenarios | Inputs or actions and observable expected results, covering normal, error, and relevant regression cases |
 | `验收命令` — Acceptance commands | Commands that can be run directly, with clear pass criteria |
-| `代码版本` — Code version | Working directory, branch, base commit, pre-existing changes, handoff HEAD, and SHA-256 hashes or deletion states for uncommitted code |
+| `代码版本` — Code version | Filled in automatically by `duo start` / `duo handoff`; do not edit by hand |
 | `状态` — State | One of `待办`, `进行中`, `待验收`, or `完成` |
 | `备注` — Notes | Implementation details, verification results, or reasons for returning the task |
 
 See the full [task template](template/.work/tasks/000-template.md).
 
-### Code Versions and Review Evidence
+### The `duo` Record-Keeping Command
 
-- Before starting, record the working directory, branch, base commit, and pre-existing changes. Preserve the original base when resuming. At handoff, record HEAD, task commits if any, and the state and SHA-256 of uncommitted code files. Automatic commits are not required.
-- Review committed changes with `git diff <base-commit> <handoff-HEAD>` using the recorded commits. Also inspect `git diff --cached`, `git diff`, and `git status --short --untracked-files=all`, and read new files. Default `git diff` alone misses committed, staged, and untracked content.
-- Compare against the starting record to distinguish task changes from pre-existing work. If code changes after handoff or its version cannot be confirmed, complete the evidence or arrange a new handoff before accepting it.
-- Without Git or an initial commit, follow the protocol to record the starting file list, hashes of relevant existing files, handoff differences, and resulting file hashes or deletion states. Do not compare nonexistent commits.
-- Passing commands must also satisfy the acceptance scenarios. For a login validation task, check that missing passwords return the expected error and valid credentials still work, then record actual results. A successful build alone does not verify behavior.
+Run it from anywhere inside the project; it searches upward for `.work/tasks`.
+
+| Command | Used by | Purpose |
+| --- | --- | --- |
+| `duo new <name>` | Architect | Allocates the next number and creates a task file from the template |
+| `duo start <number>` | Implementer | Records working directory, branch, base commit, and pre-existing changes, and sets In progress; keeps the original base when resuming |
+| `duo handoff <number>` | Implementer | Checks scope, records handoff HEAD, task commits, and SHA-256 of uncommitted files, and sets Ready for review; refuses out-of-scope changes |
+| `duo check <number>` | Architect | Verifies state, working directory, branch, HEAD, and that files are unchanged since handoff, checks scope, and lists changes to review |
+| `duo status` | Anyone | Summarizes all task states and suggests the next step |
+
+- Snapshots are stored in `.work/snapshots/NNN-base.tsv` and `NNN-handoff.tsv`; commit them along with task files.
+- Pre-existing changes that are unchanged at handoff are not attributed to the task; pre-existing files modified again by the task are attributed and scope-checked.
+- Without Git or an initial commit, `duo` falls back to full file snapshots instead of commit diffs.
+- `duo check` only guarantees that the handed-off code is what is there now and that it stays in scope; it does not replace code review or behavioral verification. Passing commands must also satisfy the acceptance scenarios. For a login validation task, check that missing passwords return the expected error and valid credentials still work, then record actual results. A successful build alone does not verify behavior.
 
 ## Repository Structure
 
 ```text
 duo-kit/
 ├── bin/
+│   ├── duo                    # Record keeping: new, start, handoff, check, status
 │   ├── duo-common.sh          # Shared backup and rule update helpers
 │   ├── duo-install            # Installs or updates global rules and the command template
 │   └── duo-init               # Copies project templates into the current directory
 ├── global/
-│   ├── codex-AGENTS.md        # Codex default and collaboration mode rules
-│   ├── cursor-user-rules.md   # Cursor implementation protocol
+│   ├── codex-AGENTS.md        # Codex default mode and /duo trigger (points to project protocol)
+│   ├── cursor-user-rules.md   # Cursor implementer trigger (points to project protocol)
 │   └── codex-prompts/
 │       └── duo.md             # Optional Codex CLI custom prompt template
-└── template/                  # Templates used to initialize projects
+└── template/                  # Project templates; the AGENTS.md marked block is the only protocol text
 ```
 
 ## Updating and Removing
@@ -205,11 +217,12 @@ duo-init --update
 
 - Changed files are backed up alongside the originals as `filename.duo-backup.random-suffix`. Identical files are skipped without new backups. Restore manually from a backup if needed; backups may contain personal rules, so consider adding them to your project's `.gitignore`.
 - Project descriptions, commands, and custom rules outside the managed block are preserved. Existing plans, notes, and actual task files under `.work/` are never overwritten. With `--update`, `000-template.md` is backed up and replaced as a whole file; merge custom template content manually from the backup. Identical content produces no new backup, and plain `duo-init` still preserves existing templates.
+- Global rules only trigger collaboration and point to the project protocol. After upgrading, run `duo-init --update` in each project so its `AGENTS.md` gets the protocol that uses `duo`, and replace Cursor User Rules with the new short version. Tasks started by hand before the upgrade have no `.work/snapshots/` snapshot; `duo` refuses to hand them off, so the architect should confirm the current state and arrange a new handoff.
 - After updating, the template contains the latest fields. Compare existing tasks with the [task template](template/.work/tasks/000-template.md) and manually add `验收场景` (Acceptance scenarios) and `代码版本` (Code version). If the historical base is unknown, record the current state and explicitly arrange a new handoff rather than inventing old records.
 - For older projects without markers, the section titled `## 协作协议(架构师 + 突击手)` is replaced up to the next heading of the same or a higher level. Merge custom content from that section back from the backup. If no such section exists, the managed block is appended.
 - Keep custom rules outside the managed block. Prompt files and Cursor project rules are replaced as whole files; manually merge their customizations from backups. Cursor User Rules still need to be pasted manually; the installer copies them to the clipboard.
 - Unpaired or duplicate markers cause an error; the affected rule file is preserved. Repair its markers before retrying.
-- Both scripts support `--help`. Updates use the local toolkit contents and do not fetch repository changes.
+- All three scripts support `--help`. Updates use the local toolkit contents and do not fetch repository changes.
 
 To remove the toolkit's configuration:
 
@@ -248,5 +261,5 @@ Integration tests use a temporary HOME, temporary projects, and an isolated clip
 
 ```bash
 python3 -m unittest discover -s tests -v
-bash -n bin/duo-install bin/duo-init bin/duo-common.sh
+bash -n bin/duo bin/duo-install bin/duo-init bin/duo-common.sh
 ```
